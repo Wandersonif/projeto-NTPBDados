@@ -1,0 +1,27 @@
+Dashboard de Vendas Fictícias
+
+Objetivo
+
+Criar um sistema de análise de vendas com gráficos e relatórios em tempo real simulando uma loja virtual.
+
+Tecnologias
+React ou HTML/CSS/JavaScript
+Node.js ou Python
+PostgreSQL ou MySQL
+Chart.js
+
+Funcionalidades
+Cadastro de produtos
+Registro de vendas
+Filtros por data e categoria
+Gráficos de desempenho
+Ranking de produtos mais vendidos
+Painel administrativo
+
+Conceitos trabalhados
+Banco de dados relacional
+Consultas SQL
+Agregações e relatórios
+Visualização de dados
+Integração frontend + backend
+Análise de dados
