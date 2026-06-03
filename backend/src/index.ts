@@ -1,9 +1,10 @@
 import express from 'express';
-import cors from 'cors';
 import dotenv from 'dotenv';
-import pool from './db.js';
-
+// Dotenv deve vir antes de qualquer importação que use o banco
 dotenv.config();
+
+import cors from 'cors';
+import pool from './db.js';
 
 const app = express();
 const port = process.env.PORT || 3001;
@@ -23,8 +24,8 @@ app.get('/api/categories', async (req, res) => {
     const result = await pool.query('SELECT * FROM categorias ORDER BY nome');
     res.json(result.rows);
   } catch (err) {
-    console.error('ERRO CRÍTICO /api/categories:', err);
-    res.status(500).json({ error: 'Erro interno ao buscar categorias.', details: err instanceof Error ? err.message : String(err) });
+    console.error('ERRO /api/categories:', err);
+    res.status(500).json({ error: 'Erro interno ao buscar categorias.' });
   }
 });
 
@@ -39,7 +40,7 @@ app.get('/api/products', async (req, res) => {
     `);
     res.json(result.rows);
   } catch (err) {
-    console.error('Erro /api/products:', err);
+    console.error('ERRO /api/products:', err);
     res.status(500).json({ error: 'Erro ao buscar produtos.' });
   }
 });
@@ -68,50 +69,30 @@ app.get('/api/dashboard/stats', async (req, res) => {
       ranking: rankingQuery.rows
     });
   } catch (err) {
-    console.error('Erro /api/dashboard/stats:', err);
+    console.error('ERRO /api/dashboard/stats:', err);
     res.status(500).json({ error: 'Erro ao processar estatísticas.' });
   }
 });
 
-// 4. Registrar Venda (CORRIGIDO: Coluna 'quantidade' em vez de 'quantity')
+// 4. Registrar Venda
 app.post('/api/sales', async (req, res) => {
   const { productId, quantity } = req.body;
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    
     const productRes = await client.query('SELECT preco, estoque FROM produtos WHERE id = $1', [productId]);
     if (productRes.rows.length === 0) throw new Error('Produto não encontrado.');
-    
     const { preco, estoque } = productRes.rows[0];
     if (estoque < quantity) throw new Error('Estoque insuficiente no banco.');
-    
     const totalVenda = preco * quantity;
-
-    // Inserir Venda
-    const vendaRes = await client.query(
-      'INSERT INTO vendas (total_venda) VALUES ($1) RETURNING id', 
-      [totalVenda]
-    );
+    const vendaRes = await client.query('INSERT INTO vendas (total_venda) VALUES ($1) RETURNING id', [totalVenda]);
     const vendaId = vendaRes.rows[0].id;
-
-    // Inserir Item (Ajustado para coluna 'quantidade')
-    await client.query(
-      'INSERT INTO itens_venda (venda_id, produto_id, quantidade, preco_unitario) VALUES ($1, $2, $3, $4)', 
-      [vendaId, productId, quantity, preco]
-    );
-
-    // Atualizar Produto
-    await client.query(
-      'UPDATE produtos SET estoque = estoque - $1, sales = sales + $1 WHERE id = $2', 
-      [quantity, productId]
-    );
-
+    await client.query('INSERT INTO itens_venda (venda_id, produto_id, quantidade, preco_unitario) VALUES ($1, $2, $3, $4)', [vendaId, productId, quantity, preco]);
+    await client.query('UPDATE produtos SET estoque = estoque - $1, sales = sales + $1 WHERE id = $2', [quantity, productId]);
     await client.query('COMMIT');
     res.json({ success: true, message: 'Venda processada com sucesso no PostgreSQL!' });
   } catch (err: any) {
     await client.query('ROLLBACK');
-    console.error('Erro /api/sales:', err);
     res.status(400).json({ error: err.message });
   } finally {
     client.release();
@@ -128,8 +109,8 @@ app.post('/api/products', async (req, res) => {
     );
     res.json({ success: true, product: result.rows[0], message: 'Produto cadastrado com sucesso!' });
   } catch (err) {
-    console.error('Erro /api/products:', err);
-    res.status(500).json({ error: 'Erro ao cadastrar produto no banco.' });
+    console.error('ERRO /api/products:', err);
+    res.status(500).json({ error: 'Erro ao cadastrar produto.' });
   }
 });
 
