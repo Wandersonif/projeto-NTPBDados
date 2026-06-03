@@ -564,6 +564,27 @@ body {
   margin-top: 0.5rem;
 }
 
+/* Loading Screen */
+.loading-screen {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  gap: 1.5rem;
+  background: var(--main-bg);
+  color: var(--primary);
+}
+
+.spinner {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
 @media (max-width: 1024px) {
   .dashboard-grid-new { grid-template-columns: 1fr; }
   .table-card.full-width { grid-column: span 1; }
