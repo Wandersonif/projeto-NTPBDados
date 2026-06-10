@@ -60,6 +60,48 @@ psql -d ntpb_dados -f docs/setup_banco.sql
 
 Se o banco já existir, execute o script para criar a tabela `usuarios` e garantir as tabelas principais. O cadastro do primeiro usuário é feito pela tela inicial do frontend ou pelo endpoint `/api/auth/register`.
 
+### Ajuste em Banco Já Existente
+
+No ambiente local usado no projeto, o backend conecta com o usuário `ntpbusr`:
+
+```env
+DATABASE_URL=postgresql://ntpbusr:ntpb123@localhost:5434/ntpbdados
+```
+
+Esse usuário consegue usar as tabelas da aplicação, mas pode não ter permissão para criar novas tabelas no schema `public`. Se o cadastro de usuário retornar erro porque a tabela `usuarios` não existe, entre no PostgreSQL com um usuário administrador:
+
+```bash
+sudo -u postgres psql -p 5434 -d ntpbdados
+```
+
+Depois execute:
+
+```sql
+CREATE TABLE IF NOT EXISTS public.usuarios (
+  id SERIAL PRIMARY KEY,
+  nome VARCHAR(120) NOT NULL,
+  email VARCHAR(160) NOT NULL UNIQUE,
+  senha_hash TEXT NOT NULL,
+  perfil VARCHAR(50) NOT NULL DEFAULT 'admin',
+  criado_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.usuarios TO ntpbusr;
+GRANT USAGE, SELECT ON SEQUENCE public.usuarios_id_seq TO ntpbusr;
+```
+
+Para conferir:
+
+```sql
+SELECT id, nome, email, perfil, criado_at FROM public.usuarios;
+```
+
+Para sair:
+
+```sql
+\q
+```
+
 ## Variáveis de Ambiente
 
 Crie `backend/.env`:
