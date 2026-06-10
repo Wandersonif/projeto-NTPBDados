@@ -1,20 +1,17 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import type { FormEvent, ReactNode } from 'react';
 import { 
   LayoutDashboard, 
   Package, 
   ShoppingCart, 
   TrendingUp, 
-  Users, 
   Plus, 
   Filter, 
   Search, 
   MoreVertical,
   ArrowUpRight,
   ArrowDownRight,
-  Calendar,
   LogOut,
-  Bell,
-  Settings,
   X,
   CheckCircle2,
   AlertCircle,
@@ -32,7 +29,8 @@ import {
   LineElement,
   Filler
 } from 'chart.js';
-import { Bar, Line } from 'react-chartjs-2';
+import type { ChartOptions } from 'chart.js';
+import { Bar } from 'react-chartjs-2';
 import './App.css';
 
 ChartJS.register(
@@ -49,14 +47,62 @@ ChartJS.register(
 
 const API_URL = 'http://localhost:3001/api';
 
+type AuthUser = {
+  id: number;
+  nome: string;
+  email: string;
+  perfil: string;
+};
+
+type Product = {
+  id: number;
+  nome: string;
+  preco: number | string;
+  estoque: number;
+  categoria_id: number | null;
+  categoria_nome?: string | null;
+  status: string;
+  sales: number;
+};
+
+type Category = {
+  id: number;
+  nome: string;
+  descricao?: string | null;
+};
+
+type DashboardMetrics = {
+  receita_total: number | string;
+  total_vendas: number | string;
+  total_produtos: number | string;
+  ticket_medio: number | string;
+};
+
+type RankingItem = Pick<Product, 'nome' | 'preco' | 'estoque' | 'status' | 'sales'> & {
+  cat: string;
+};
+
+type DashboardData = {
+  metrics: DashboardMetrics;
+  ranking: RankingItem[];
+};
+
+function getErrorMessage(err: unknown, fallback: string) {
+  return err instanceof Error ? err.message : fallback;
+}
+
 function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [isSidebarOpen, setSidebarOpen] = useState(true);
-  const [products, setProducts] = useState<any[]>([]);
-  const [categories, setCategories] = useState<any[]>([]);
-  const [dashboardData, setDashboardData] = useState<any>(null);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
+  const [authToken, setAuthToken] = useState(() => localStorage.getItem('ntpb_token'));
+  const [authUser, setAuthUser] = useState<AuthUser | null>(null);
+  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
+  const [productSearch, setProductSearch] = useState('');
   const [notification, setNotification] = useState<{msg: string, type: 'success' | 'error'} | null>(null);
 
   const notify = (msg: string, type: 'success' | 'error' = 'success') => {
@@ -64,48 +110,122 @@ function App() {
     setTimeout(() => setNotification(null), 3000);
   };
 
+  const apiFetch = useCallback((path: string, options: RequestInit = {}) => {
+    const headers = new Headers(options.headers);
+    if (!headers.has('Content-Type') && options.body) headers.set('Content-Type', 'application/json');
+    if (authToken) headers.set('Authorization', `Bearer ${authToken}`);
+
+    return fetch(`${API_URL}${path}`, { ...options, headers });
+  }, [authToken]);
+
   const fetchProducts = useCallback(async () => {
+    if (!authToken) return;
     try {
-      const res = await fetch(`${API_URL}/products`);
+      const res = await apiFetch('/products');
       const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
       setProducts(Array.isArray(data) ? data : []);
-    } catch (err) {
+    } catch {
       notify('Erro ao carregar produtos.', 'error');
     }
-  }, []);
+  }, [apiFetch, authToken]);
 
   const fetchCategories = useCallback(async () => {
+    if (!authToken) return;
     try {
-      const res = await fetch(`${API_URL}/categories`);
+      const res = await apiFetch('/categories');
       const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
       setCategories(Array.isArray(data) ? data : []);
-    } catch (err) {
+    } catch {
       console.error('Erro ao carregar categorias.');
     }
-  }, []);
+  }, [apiFetch, authToken]);
 
   const fetchDashboard = useCallback(async () => {
+    if (!authToken) return;
     try {
-      const res = await fetch(`${API_URL}/dashboard/stats`);
+      const res = await apiFetch('/dashboard/stats');
       const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
       setDashboardData(data);
-    } catch (err) {
+    } catch {
       notify('Erro ao carregar métricas.', 'error');
     }
-  }, []);
+  }, [apiFetch, authToken]);
 
   useEffect(() => {
     const loadAll = async () => {
+      if (!authToken) {
+        setLoading(false);
+        return;
+      }
+
       setLoading(true);
-      await Promise.all([fetchProducts(), fetchCategories(), fetchDashboard()]);
-      setLoading(false);
+      try {
+        const authRes = await apiFetch('/auth/me');
+        const authData = await authRes.json();
+
+        if (!authRes.ok) throw new Error(authData.error);
+
+        setAuthUser(authData.user);
+        await Promise.all([fetchProducts(), fetchCategories(), fetchDashboard()]);
+      } catch {
+        localStorage.removeItem('ntpb_token');
+        setAuthToken(null);
+        setAuthUser(null);
+        notify('Sessão expirada. Faça login novamente.', 'error');
+      } finally {
+        setLoading(false);
+      }
     };
     loadAll();
-  }, [fetchProducts, fetchCategories, fetchDashboard]);
+  }, [apiFetch, authToken, fetchProducts, fetchCategories, fetchDashboard]);
 
-  const handleAddProduct = async (e: any) => {
+  const persistSession = (token: string, user: AuthUser) => {
+    localStorage.setItem('ntpb_token', token);
+    setAuthToken(token);
+    setAuthUser(user);
+  };
+
+  const handleAuth = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    const formData = new FormData(e.target);
+    const formData = new FormData(e.currentTarget);
+    const payload = {
+      nome: formData.get('nome'),
+      email: formData.get('email'),
+      password: formData.get('password')
+    };
+
+    try {
+      const res = await fetch(`${API_URL}/auth/${authMode}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(authMode === 'login' ? { email: payload.email, password: payload.password } : payload)
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+
+      persistSession(data.token, data.user);
+      notify(authMode === 'login' ? 'Login realizado com sucesso.' : 'Usuário cadastrado com sucesso.');
+    } catch (err: unknown) {
+      notify(getErrorMessage(err, 'Erro ao autenticar usuário.'), 'error');
+    }
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('ntpb_token');
+    setAuthToken(null);
+    setAuthUser(null);
+    setProducts([]);
+    setCategories([]);
+    setDashboardData(null);
+    setActiveTab('dashboard');
+  };
+
+  const handleAddProduct = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const formData = new FormData(e.currentTarget);
     const newProduct = {
       nome: formData.get('nome'),
       preco: Number(formData.get('preco')),
@@ -114,9 +234,8 @@ function App() {
     };
 
     try {
-      const res = await fetch(`${API_URL}/products`, {
+      const res = await apiFetch('/products', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newProduct)
       });
       const data = await res.json();
@@ -124,23 +243,22 @@ function App() {
       notify(data.message);
       setShowModal(false);
       await Promise.all([fetchProducts(), fetchDashboard()]);
-    } catch (err: any) {
-      notify(err.message, 'error');
+    } catch (err: unknown) {
+      notify(getErrorMessage(err, 'Erro ao cadastrar produto.'), 'error');
     }
   };
 
-  const handleProcessSale = async (e: any) => {
+  const handleProcessSale = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    const formData = new FormData(e.target);
+    const formData = new FormData(e.currentTarget);
     const saleData = {
       productId: Number(formData.get('productId')),
       quantity: Number(formData.get('quantity'))
     };
 
     try {
-      const res = await fetch(`${API_URL}/sales`, {
+      const res = await apiFetch('/sales', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(saleData)
       });
       const data = await res.json();
@@ -148,8 +266,8 @@ function App() {
       notify(data.message);
       await Promise.all([fetchProducts(), fetchDashboard()]);
       setActiveTab('dashboard');
-    } catch (err: any) {
-      notify(err.message, 'error');
+    } catch (err: unknown) {
+      notify(getErrorMessage(err, 'Erro ao registrar venda.'), 'error');
     }
   };
 
@@ -169,24 +287,69 @@ function App() {
     };
   }, [products]);
 
-  const lineData = {
-    labels: ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sab', 'Dom'],
-    datasets: [{
-      label: 'Vendas',
-      data: [31, 40, 28, 51, 42, 109, 100],
-      fill: true,
-      borderColor: '#6366f1',
-      backgroundColor: 'rgba(99, 102, 241, 0.1)',
-      tension: 0.4,
-      pointRadius: 4,
-    }]
-  };
+  const filteredProducts = useMemo(() => {
+    const search = productSearch.trim().toLowerCase();
+    if (!search) return products;
+
+    return products.filter(product => {
+      const category = product.categoria_nome || 'Geral';
+      return `${product.nome} ${category} ${product.status}`.toLowerCase().includes(search);
+    });
+  }, [productSearch, products]);
 
   if (loading) {
     return (
       <div className="loading-screen">
         <Loader2 className="spinner" size={48} />
         <p>Sincronizando com PostgreSQL...</p>
+      </div>
+    );
+  }
+
+  if (!authToken || !authUser) {
+    return (
+      <div className="auth-layout">
+        {notification && (
+          <div className={`toast-notification fade-in ${notification.type}`}>
+            {notification.type === 'success' ? <CheckCircle2 size={18} /> : <AlertCircle size={18} />}
+            {notification.msg}
+          </div>
+        )}
+
+        <section className="auth-panel">
+          <div className="auth-brand">
+            <div className="brand-icon">N</div>
+            <div>
+              <h1>NTPBDados</h1>
+              <p>Área de controle de vendas</p>
+            </div>
+          </div>
+
+          <div className="auth-tabs" role="tablist">
+            <button className={authMode === 'login' ? 'active' : ''} onClick={() => setAuthMode('login')}>Entrar</button>
+            <button className={authMode === 'register' ? 'active' : ''} onClick={() => setAuthMode('register')}>Cadastrar</button>
+          </div>
+
+          <form className="modern-form auth-form" onSubmit={handleAuth}>
+            {authMode === 'register' && (
+              <div className="field">
+                <label>Nome</label>
+                <input name="nome" required placeholder="Seu nome" />
+              </div>
+            )}
+            <div className="field">
+              <label>E-mail</label>
+              <input name="email" type="email" required placeholder="admin@ntpbdados.com" />
+            </div>
+            <div className="field">
+              <label>Senha</label>
+              <input name="password" type="password" minLength={6} required placeholder="Mínimo 6 caracteres" />
+            </div>
+            <button type="submit" className="btn-primary-new full">
+              {authMode === 'login' ? 'Entrar' : 'Criar conta'}
+            </button>
+          </form>
+        </section>
       </div>
     );
   }
@@ -213,16 +376,13 @@ function App() {
           <NavItem active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} icon={<LayoutDashboard size={20} />} label="Dashboard" expanded={isSidebarOpen} />
           <NavItem active={activeTab === 'produtos'} onClick={() => setActiveTab('produtos')} icon={<Package size={20} />} label="Produtos" expanded={isSidebarOpen} />
           <NavItem active={activeTab === 'vendas'} onClick={() => setActiveTab('vendas')} icon={<ShoppingCart size={20} />} label="Vendas" expanded={isSidebarOpen} />
-          <div className="nav-divider" />
-          <NavItem icon={<Users size={20} />} label="Equipe" expanded={isSidebarOpen} />
-          <NavItem icon={<Settings size={20} />} label="Configurações" expanded={isSidebarOpen} />
         </nav>
 
         <div className="sidebar-bottom">
           <div className="user-profile">
-            <div className="avatar">W</div>
-            {isSidebarOpen && <div className="user-info"><p className="name">Wanderson</p><p className="role">Admin Project</p></div>}
-            {isSidebarOpen && <LogOut size={16} className="logout-icon" />}
+            <div className="avatar">{authUser.nome[0]?.toUpperCase()}</div>
+            {isSidebarOpen && <div className="user-info"><p className="name">{authUser.nome}</p><p className="role">{authUser.perfil}</p></div>}
+            {isSidebarOpen && <button className="logout-button" onClick={handleLogout} title="Sair"><LogOut size={16} /></button>}
           </div>
         </div>
       </aside>
@@ -231,11 +391,17 @@ function App() {
         <header className="top-header">
           <div className="header-left">
             <button className="menu-toggle" onClick={() => setSidebarOpen(!isSidebarOpen)}><MoreVertical size={20} /></button>
-            <div className="search-bar"><Search size={18} /><input type="text" placeholder="Consultar banco..." /></div>
+            <div className="search-bar">
+              <Search size={18} />
+              <input
+                type="search"
+                placeholder="Buscar produtos..."
+                value={productSearch}
+                onChange={(event) => setProductSearch(event.target.value)}
+              />
+            </div>
           </div>
           <div className="header-right">
-            <button className="icon-btn"><Calendar size={20} /></button>
-            <button className="icon-btn notification"><Bell size={20} /><span></span></button>
             <button className="btn-primary-new" onClick={() => { setActiveTab('produtos'); setShowModal(true); }}>
               <Plus size={18} /><span>Novo Produto</span>
             </button>
@@ -266,7 +432,7 @@ function App() {
                 <table className="custom-table">
                   <thead><tr><th>Produto</th><th>Vendas</th></tr></thead>
                   <tbody>
-                    {ranking.map((p: any, i: number) => (
+                    {ranking.map((p, i) => (
                       <tr key={i}>
                         <td><div className="product-cell"><span>{p.nome}</span></div></td>
                         <td><span className="status-pill high">{p.sales}</span></td>
@@ -282,16 +448,16 @@ function App() {
         {activeTab === 'produtos' && (
           <div className="view-container fade-in">
             <div className="view-header">
-              <div><h1>Inventário Central</h1><p>Conectado ao PostgreSQL 16.</p></div>
+              <div><h1>Inventário Central</h1><p>{filteredProducts.length} produto(s) encontrado(s).</p></div>
               <button className="btn-primary-new" onClick={() => setShowModal(true)}><Plus size={18} /> Adicionar Produto</button>
             </div>
             
             <div className="inventory-grid-v2">
               <div className="table-card full-width">
                 <table className="custom-table">
-                  <thead><tr><th>Produto</th><th>Categoria</th><th>Preço</th><th>Estoque</th><th>Ações</th></tr></thead>
+                  <thead><tr><th>Produto</th><th>Categoria</th><th>Preço</th><th>Estoque</th></tr></thead>
                   <tbody>
-                    {products.map(p => (
+                    {filteredProducts.map(p => (
                       <tr key={p.id}>
                         <td><div className="product-cell"><div className="product-img">{p.nome[0]}</div><span>{p.nome}</span></div></td>
                         <td><span className="badge-cat">{p.categoria_nome || 'Geral'}</span></td>
@@ -302,7 +468,6 @@ function App() {
                             <span>{p.estoque} un</span>
                           </div>
                         </td>
-                        <td><button className="icon-btn"><Settings size={16} /></button></td>
                       </tr>
                     ))}
                   </tbody>
@@ -322,7 +487,7 @@ function App() {
                        <div className="field">
                           <label>Produto (Postgres)</label>
                           <select name="productId" required>
-                             {products.map(p => (
+                             {filteredProducts.map(p => (
                                <option key={p.id} value={p.id} disabled={p.estoque === 0}>
                                  {p.nome} ({p.estoque} un)
                                </option>
@@ -383,15 +548,23 @@ function App() {
   );
 }
 
-const chartOptions = {
+const chartOptions: ChartOptions<'bar'> = {
   plugins: { legend: { display: false } },
   scales: {
     x: { grid: { display: false } },
-    y: { grid: { borderDash: [5, 5] } }
+    y: { grid: { display: true } }
   }
 };
 
-function NavItem({ icon, label, active, onClick, expanded }: any) {
+type NavItemProps = {
+  icon: ReactNode;
+  label: string;
+  active?: boolean;
+  onClick?: () => void;
+  expanded: boolean;
+};
+
+function NavItem({ icon, label, active = false, onClick, expanded }: NavItemProps) {
   return (
     <button className={`nav-item ${active ? 'active' : ''}`} onClick={onClick}>
       {icon}{expanded && <span>{label}</span>}{active && expanded && <div className="active-indicator" />}
@@ -399,7 +572,15 @@ function NavItem({ icon, label, active, onClick, expanded }: any) {
   );
 }
 
-function MetricCard({ title, value, trend, up, icon }: any) {
+type MetricCardProps = {
+  title: string;
+  value: ReactNode;
+  trend: string;
+  up: boolean;
+  icon: ReactNode;
+};
+
+function MetricCard({ title, value, trend, up, icon }: MetricCardProps) {
   return (
     <div className="metric-card-new">
       <div className="metric-icon">{icon}</div>

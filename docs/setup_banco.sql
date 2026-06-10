@@ -33,11 +33,21 @@ CREATE TABLE IF NOT EXISTS itens_venda (
     preco_unitario DECIMAL(10,2) NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS usuarios (
+    id SERIAL PRIMARY KEY,
+    nome VARCHAR(120) NOT NULL,
+    email VARCHAR(160) NOT NULL UNIQUE,
+    senha_hash TEXT NOT NULL,
+    perfil VARCHAR(50) NOT NULL DEFAULT 'admin',
+    criado_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 -- 2. Inserção de Dados Iniciais (Seed)
 INSERT INTO categorias (nome, descricao) VALUES 
 ('Eletrônicos', 'Dispositivos eletrônicos e gadgets'),
 ('Periféricos', 'Teclados, mouses e monitores'),
-('Acessórios', 'Fones de ouvido e cabos');
+('Acessórios', 'Fones de ouvido e cabos')
+ON CONFLICT (nome) DO NOTHING;
 
 INSERT INTO produtos (nome, preco, estoque, categoria_id, status) VALUES 
 ('Smartphone Galaxy S24', 4500.00, 15, 1, 'Em Alta'),
